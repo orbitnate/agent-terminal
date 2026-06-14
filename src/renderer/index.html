@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Terminal</title>
+    <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="terminal-mark" aria-hidden="true">›_</div>
+          <div>
+            <h1>Agent Terminal</h1>
+            <p id="shellLabel">Starting terminal...</p>
+          </div>
+        </div>
+
+        <div class="status-strip">
+          <div class="field">
+            <span>Session</span>
+            <strong id="sessionId">-----</strong>
+          </div>
+          <div class="field wide">
+            <span>API</span>
+            <strong id="apiUrl">Starting...</strong>
+          </div>
+          <div class="field token">
+            <span>Token</span>
+            <strong id="apiToken">Hidden</strong>
+          </div>
+          <button id="copySession" class="icon-button" title="Copy session ID" aria-label="Copy session ID">
+            <span aria-hidden="true">⧉</span>
+          </button>
+          <button id="copyApi" class="icon-button" title="Copy API URL" aria-label="Copy API URL">
+            <span aria-hidden="true">⧉</span>
+          </button>
+          <button id="copyToken" class="icon-button" title="Copy API token" aria-label="Copy API token">
+            <span aria-hidden="true">🔑</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="controlbar">
+        <label class="select-label">
+          <span>Active session</span>
+          <select id="sessionSelect"></select>
+        </label>
+        <button id="newSession" class="text-button">New Session</button>
+        <button id="toggleApi" class="text-button danger">Disable Control</button>
+        <button id="pauseAgents" class="text-button">Pause Agents</button>
+      </section>
+
+      <section class="workspace">
+        <section class="terminal-frame">
+          <div id="terminal"></div>
+        </section>
+
+        <aside class="side-panel">
+          <section>
+            <h2>Approvals</h2>
+            <div id="approvals" class="approval-list empty">No pending approvals</div>
+          </section>
+          <section>
+            <h2>Agent Activity</h2>
+            <div id="activity" class="activity-list empty">No agent actions yet</div>
+          </section>
+        </aside>
+      </section>
+
+      <footer class="footer">
+        <span id="connectionStatus">Local control server starting</span>
+        <span id="lastAction">Waiting for terminal output</span>
+      </footer>
+    </main>
+
+    <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+    <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

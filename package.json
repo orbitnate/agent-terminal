@@ -1,0 +1,30 @@
+{
+  "name": "agent-terminal",
+  "version": "0.1.0",
+  "description": "A local Mac terminal window that agents can connect to, type into, and read from.",
+  "main": "src/main.js",
+  "type": "commonjs",
+  "bin": {
+    "agent-terminal": "bin/agent-terminal.js",
+    "agent-terminal-mcp": "bin/agent-terminal-mcp.js"
+  },
+  "scripts": {
+    "start": "electron .",
+    "agent": "node bin/agent-terminal.js",
+    "check": "node --check src/main.js && node --check src/api-server.js && node --check src/controller.js && node --check src/terminal-session.js && node --check src/client.js && node --check src/preload.js && node --check src/renderer/renderer.js && node --check bin/agent-terminal.js && node --check bin/agent-terminal-mcp.js",
+    "test": "node --test",
+    "postinstall": "electron-rebuild -f -w node-pty"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/headless": "^6.0.0",
+    "@xterm/xterm": "^5.5.0",
+    "electron": "^42.4.0",
+    "express": "^4.19.2",
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4"
+  }
+}
