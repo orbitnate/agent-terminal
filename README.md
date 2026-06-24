@@ -1,6 +1,6 @@
 # Agent Terminal
 
-Agent Terminal is a local Mac terminal window that another local tool can supervise safely. You open the app, then Codex, Claude Code, or another agent can connect through the local API, read the clean screen state, request actions, and type into the visible terminal under policy controls.
+Agent Terminal is a local Mac terminal window that another local tool can supervise. You open the app, then Codex, Claude Code, or another agent can connect through the local API, read the clean screen state, run actions, and type into the visible terminal.
 
 ## Run it
 
@@ -11,12 +11,45 @@ npm start
 
 The app starts a local control API on `127.0.0.1`. The API now requires a per-launch token. The helper CLI automatically loads the current URL and token from the app runtime file.
 
+## Agent Discovery
+
+In the app, press **Copy Agent Prompt** and paste it into any local coding agent.
+
+Coding agents should start here instead of guessing ports, tokens, or session IDs:
+
+```bash
+./bin/agent-terminal.js discover --json
+```
+
+If an agent needs to call the local HTTP API directly:
+
+```bash
+./bin/agent-terminal.js discover --json --show-token
+```
+
+If an agent supports MCP:
+
+```bash
+./bin/agent-terminal.js mcp-config
+```
+
+The app also exposes local discovery documents:
+
+```text
+GET /.well-known/agent-terminal.json
+GET /agent-terminal/v1/manifest
+GET /openapi.json
+```
+
+See [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md) for the stable agent contract.
+
 ## Core Workflow
 
 ```bash
 ./bin/agent-terminal.js list
 ./bin/agent-terminal.js screen <session-id>
 ./bin/agent-terminal.js state <session-id>
+./bin/agent-terminal.js delete <session-id>
 ./bin/agent-terminal.js launch <session-id> claude-opus
 ./bin/agent-terminal.js send <session-id> "hello, claude"
 ```
@@ -45,21 +78,11 @@ Use `run` when the session is at a normal shell prompt and you need an exit code
 
 `run` wraps the command with markers and returns JSON containing `exitCode`, `output`, and `nextOffset`.
 
-## Approval And Pause
+## Local Control And Pause
 
-Agent-originated actions are checked against a policy:
+Agent-originated actions run directly on the local machine, with one guardrail:
 
-- Read-only commands such as `pwd`, `ls`, `rg`, `cat`, `sed`, `git status`, and test/check commands are allowed.
-- File writes, installs, pushes, commits, shell scripts, and unknown commands require approval.
 - Obviously destructive commands are blocked.
-
-Approval commands:
-
-```bash
-./bin/agent-terminal.js approvals
-./bin/agent-terminal.js approve <approval-id>
-./bin/agent-terminal.js deny <approval-id>
-```
 
 Emergency controls:
 
@@ -70,7 +93,7 @@ Emergency controls:
 ./bin/agent-terminal.js enable-api
 ```
 
-The app UI also has pause, disable, approve, and deny controls.
+The app UI also has pause and disable controls.
 
 ## Secure API
 
@@ -80,13 +103,19 @@ Every API request needs:
 Authorization: Bearer <token>
 ```
 
-The app rejects non-loopback Host headers and rejects browser-origin requests from non-loopback origins. This prevents drive-by browser requests from typing into your terminal.
+By default the app rejects non-loopback Host headers and rejects browser-origin requests from non-loopback origins. This prevents drive-by browser requests from typing into your terminal.
+
+The copied **Copy Agent Prompt** has the URL and token baked in, so an agent can be on a different machine than the app — just paste it, no agent-side setup. If you run the app on a remote server, see [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md) for the one-time server config.
 
 Useful endpoints:
 
 ```text
+GET  /.well-known/agent-terminal.json
+GET  /agent-terminal/v1/manifest
+GET  /openapi.json
 GET  /sessions
 POST /sessions
+DELETE /sessions/:id
 GET  /sessions/:id/screen
 GET  /sessions/:id/state
 POST /sessions/:id/input
@@ -94,9 +123,6 @@ POST /sessions/:id/run
 POST /sessions/:id/launch
 POST /sessions/:id/interrupt
 POST /sessions/:id/restart
-GET  /approvals
-POST /approvals/:id/approve
-POST /approvals/:id/deny
 ```
 
 ## MCP
@@ -107,7 +133,7 @@ The MCP bridge is available at:
 ./bin/agent-terminal-mcp.js
 ```
 
-It exposes tools for listing sessions, creating sessions, launching agents, sending input, reading the screen/state, running commands, approving queued actions, and pausing/resuming agent writes. It uses the same token-protected local API.
+It exposes tools for listing, creating, and deleting sessions, launching agents, sending input, reading the screen/state, running commands, and pausing/resuming agent writes. It uses the same token-protected local API.
 
 ## Runtime Files
 

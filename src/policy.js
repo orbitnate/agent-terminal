@@ -19,26 +19,6 @@ const SAFE_READ_PREFIXES = [
   'node --check'
 ];
 
-const REQUIRE_APPROVAL_PATTERNS = [
-  /\brm\b/,
-  /\bmv\b/,
-  /\bcp\b/,
-  /\bmkdir\b/,
-  /\btouch\b/,
-  /\bchmod\b/,
-  /\bchown\b/,
-  /\bsudo\b/,
-  /\bnpm\s+(install|update|audit\s+fix)\b/,
-  /\byarn\s+(add|install|upgrade)\b/,
-  /\bpnpm\s+(add|install|update)\b/,
-  /\bgit\s+(add|commit|push|merge|rebase|reset|checkout|switch|clean|tag)\b/,
-  /\b(curl|wget)\b.*\|\s*(sh|bash|zsh)/,
-  /\b(sh|bash|zsh)\s+[^;&|]+/,
-  />|>>|\btee\b/,
-  /\bpython3?\b.*(-c|\S+\.py)/,
-  /\bnode\b.*(-e|\S+\.js)/
-];
-
 const HARD_BLOCK_PATTERNS = [
   /\brm\s+-[^;&|]*r[^;&|]*f(?:\s+|=)(\/|\$HOME|~)(?:\s|$)/,
   /\bchmod\s+-R\s+777\s+(\/|\$HOME|~)\b/,
@@ -80,13 +60,7 @@ function classifyCommand(command) {
     return { decision: 'allow', reason: 'Read-only command.' };
   }
 
-  for (const pattern of REQUIRE_APPROVAL_PATTERNS) {
-    if (pattern.test(normalized)) {
-      return { decision: 'approve', reason: 'Command can modify files, install software, publish, or run scripts.' };
-    }
-  }
-
-  return { decision: 'approve', reason: 'Command is not in the read-only allowlist.' };
+  return { decision: 'allow', reason: 'Allowed for local-only control.' };
 }
 
 function classifyRawInput(input) {
@@ -97,11 +71,11 @@ function classifyRawInput(input) {
 
   const printable = text.replace(/[\r\n\t]/g, '').replace(/[\x20-\x7e]/g, '');
   if (printable.length > 0) {
-    return { decision: 'approve', reason: 'Raw input contains control characters.' };
+    return { decision: 'allow', reason: 'Raw input allowed for local-only control.' };
   }
 
   if (text.length > 4096) {
-    return { decision: 'approve', reason: 'Raw input is large.' };
+    return { decision: 'allow', reason: 'Large raw input allowed for local-only control.' };
   }
 
   const commandish = text.split(/\r?\n/).find((line) => line.trim());

@@ -2,13 +2,17 @@
 
 const { requestJson, buildPath, streamSession } = require('../src/client');
 const { stripTerminalControls } = require('../src/text-utils');
+const { buildMcpConfig, discoverAgentTerminal } = require('../src/agent-contract');
 
 function printHelp() {
   console.log(`agent-terminal
 
 Usage:
+  agent-terminal discover [--json] [--show-token]
+  agent-terminal mcp-config
   agent-terminal list
   agent-terminal create [cwd]
+  agent-terminal delete <session-id>
   agent-terminal inspect <session-id>
   agent-terminal send <session-id> <command>
   agent-terminal write <session-id> <raw-input>
@@ -25,9 +29,6 @@ Usage:
   agent-terminal resume
   agent-terminal disable-api
   agent-terminal enable-api
-  agent-terminal approvals
-  agent-terminal approve <approval-id>
-  agent-terminal deny <approval-id>
   agent-terminal tasks
 
 Environment:
@@ -54,6 +55,27 @@ function printable(data, plain) {
   return plain ? stripTerminalControls(data || '') : data || '';
 }
 
+function printDiscovery(manifest) {
+  const tokenStatus = manifest.auth.token
+    ? manifest.auth.token
+    : manifest.auth.tokenAvailable
+      ? 'available (use --show-token to print it)'
+      : 'not found';
+  const sessionCount = manifest.current && Array.isArray(manifest.current.sessions)
+    ? manifest.current.sessions.length
+    : 0;
+
+  console.log(`Agent Terminal discovery
+API: ${manifest.baseUrl}
+Runtime file: ${manifest.discovery.runtimeFile}
+Token: ${tokenStatus}
+Sessions: ${sessionCount}
+MCP command: ${manifest.transports.mcp.command} ${manifest.transports.mcp.args.join(' ')}
+CLI command: ${manifest.transports.cli.command} ${manifest.transports.cli.args.join(' ')}
+OpenAPI: ${manifest.baseUrl}${manifest.discovery.openApiPath}
+`);
+}
+
 async function watch(sessionId, since, plain) {
   streamSession(
     sessionId,
@@ -71,11 +93,28 @@ async function watch(sessionId, since, plain) {
 }
 
 async function main() {
-  const [command, sessionId, ...rest] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const [command, sessionId, ...rest] = args;
+  const commandArgs = args.slice(1);
 
   try {
     if (!command || command === 'help' || command === '--help' || command === '-h') {
       printHelp();
+      return;
+    }
+
+    if (command === 'discover') {
+      const manifest = discoverAgentTerminal({ includeToken: hasFlag(commandArgs, '--show-token') });
+      if (hasFlag(commandArgs, '--json')) {
+        console.log(JSON.stringify(manifest, null, 2));
+      } else {
+        printDiscovery(manifest);
+      }
+      return;
+    }
+
+    if (command === 'mcp-config') {
+      console.log(JSON.stringify(buildMcpConfig(), null, 2));
       return;
     }
 
@@ -91,6 +130,11 @@ async function main() {
     if (command === 'create') {
       const payload = await requestJson('POST', '/sessions', { cwd: sessionId || process.cwd() });
       console.log(JSON.stringify(payload.session, null, 2));
+      return;
+    }
+
+    if (command === 'delete' && sessionId) {
+      console.log(JSON.stringify(await requestJson('DELETE', `/sessions/${sessionId}`), null, 2));
       return;
     }
 
@@ -114,18 +158,8 @@ async function main() {
       return;
     }
 
-    if (command === 'approvals') {
-      console.log(JSON.stringify(await requestJson('GET', '/approvals'), null, 2));
-      return;
-    }
-
     if (command === 'tasks') {
       console.log(JSON.stringify(await requestJson('GET', '/tasks'), null, 2));
-      return;
-    }
-
-    if ((command === 'approve' || command === 'deny') && sessionId) {
-      console.log(JSON.stringify(await requestJson('POST', `/approvals/${sessionId}/${command}`, {}), null, 2));
       return;
     }
 

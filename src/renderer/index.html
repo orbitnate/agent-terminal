@@ -13,70 +13,80 @@
   </head>
   <body>
     <main class="shell">
-      <header class="topbar">
+      <div class="window-chrome">
+        <div class="chrome-spacer" aria-hidden="true"></div>
+        <div class="chrome-title">Agent Terminal</div>
+        <div class="chrome-hint">⌘K</div>
+      </div>
+
+      <header class="commandbar">
         <div class="brand">
           <div class="terminal-mark" aria-hidden="true">›_</div>
-          <div>
-            <h1>Agent Terminal</h1>
-            <p id="shellLabel">Starting terminal...</p>
-          </div>
+          <span id="connectionStatus" class="status-pill">Local control server starting</span>
         </div>
 
-        <div class="status-strip">
-          <div class="field">
-            <span>Session</span>
-            <strong id="sessionId">-----</strong>
-          </div>
-          <div class="field wide">
-            <span>API</span>
-            <strong id="apiUrl">Starting...</strong>
-          </div>
-          <div class="field token">
-            <span>Token</span>
-            <strong id="apiToken">Hidden</strong>
-          </div>
-          <button id="copySession" class="icon-button" title="Copy session ID" aria-label="Copy session ID">
-            <span aria-hidden="true">⧉</span>
+        <div class="commandbar-actions">
+          <button id="toggleSessions" class="icon-button" title="Toggle terminals" aria-label="Toggle terminals">
+            <span aria-hidden="true">☰</span>
           </button>
-          <button id="copyApi" class="icon-button" title="Copy API URL" aria-label="Copy API URL">
-            <span aria-hidden="true">⧉</span>
+          <button id="pauseAgents" class="text-button">
+            <span class="btn-glyph pause" aria-hidden="true">❚❚</span>
+            <span>Pause Agents</span>
           </button>
-          <button id="copyToken" class="icon-button" title="Copy API token" aria-label="Copy API token">
-            <span aria-hidden="true">🔑</span>
+          <button id="toggleApi" class="text-button danger">Disable Control</button>
+          <button id="copyAgentPrompt" class="text-button primary agent-prompt-button" title="Copy instructions for another AI agent">
+            <span class="copy-glyph" aria-hidden="true">⧉</span>
+            <span class="btn-label">Copy Agent Prompt</span>
           </button>
         </div>
       </header>
 
-      <section class="controlbar">
-        <label class="select-label">
-          <span>Active session</span>
-          <select id="sessionSelect"></select>
-        </label>
-        <button id="newSession" class="text-button">New Session</button>
-        <button id="toggleApi" class="text-button danger">Disable Control</button>
-        <button id="pauseAgents" class="text-button">Pause Agents</button>
-      </section>
-
       <section class="workspace">
+        <aside id="sessionPanel" class="session-panel">
+          <div class="session-panel-header">
+            <span class="session-panel-title">Terminals</span>
+            <button id="newSession" class="icon-button ghost" title="New terminal" aria-label="New terminal">
+              <span aria-hidden="true">＋</span>
+            </button>
+          </div>
+          <div id="sessionList" class="session-list empty">No terminals yet</div>
+          <div class="session-summary">
+            <span id="sessionCount">0 terminals</span>
+            <span id="activeSessionCount" class="active">0 active</span>
+          </div>
+        </aside>
         <section class="terminal-frame">
+          <div class="terminal-header">
+            <p id="shellLabel" class="terminal-path">Starting terminal...</p>
+          </div>
           <div id="terminal"></div>
         </section>
-
-        <aside class="side-panel">
-          <section>
-            <h2>Approvals</h2>
-            <div id="approvals" class="approval-list empty">No pending approvals</div>
-          </section>
-          <section>
-            <h2>Agent Activity</h2>
-            <div id="activity" class="activity-list empty">No agent actions yet</div>
-          </section>
-        </aside>
       </section>
 
-      <footer class="footer">
-        <span id="connectionStatus">Local control server starting</span>
-        <span id="lastAction">Waiting for terminal output</span>
+      <footer class="statusline">
+        <button id="copyApi" class="status-chip" title="Copy API URL">
+          <span class="chip-label">API</span>
+          <strong id="apiUrl">Starting...</strong>
+          <span class="chip-glyph" aria-hidden="true">⧉</span>
+        </button>
+        <span class="chip-divider" aria-hidden="true"></span>
+        <button id="copyToken" class="status-chip" title="Copy API token">
+          <span class="chip-label">Token</span>
+          <strong id="apiToken">Hidden</strong>
+          <span id="revealToken" class="reveal-link" role="button" tabindex="0" title="Reveal token">Reveal</span>
+        </button>
+        <span class="chip-divider" aria-hidden="true"></span>
+        <button id="copySession" class="status-chip" title="Copy session ID">
+          <span class="chip-label">Session</span>
+          <strong id="sessionId">-----</strong>
+          <span class="chip-glyph" aria-hidden="true">⧉</span>
+        </button>
+        <span id="lastAction" class="statusline-action">Waiting for terminal output</span>
+        <span class="destructive-badge" title="Local API only · destructive commands blocked">
+          <span class="badge-check" aria-hidden="true">✓</span>
+          <span>Destructive blocked</span>
+        </span>
+        <span id="termSize" class="term-size" aria-label="Terminal dimensions">—</span>
       </footer>
     </main>
 

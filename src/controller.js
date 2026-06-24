@@ -33,7 +33,6 @@ class AgentTerminalController extends EventEmitter {
     super();
     this.runtimeRoot = runtimeRoot;
     this.sessions = new Map();
-    this.pendingApprovals = new Map();
     this.sessionPaused = new Set();
     this.apiEnabled = true;
     this.agentPaused = false;
@@ -61,6 +60,7 @@ class AgentTerminalController extends EventEmitter {
     session.on('exit', (payload) => {
       this.audit.log({ type: 'session_exit', ...payload });
       this.emit('session:exit', payload);
+      this.emitSessionsChanged();
       this.emit('notification', {
         title: 'Terminal exited',
         body: `Session ${session.id.slice(0, 8)} exited with code ${payload.exitCode}.`
@@ -109,12 +109,51 @@ class AgentTerminalController extends EventEmitter {
     return this.getSession(this.activeSessionId);
   }
 
+  deleteSession(id, source = 'ui') {
+    const session = this.getSession(id);
+    const wasActive = this.activeSessionId === id;
+    const replacementOptions = {
+      cwd: session.cwd,
+      shell: session.shell,
+      cols: session.cols,
+      rows: session.rows
+    };
+
+    this.sessions.delete(id);
+    this.sessionPaused.delete(id);
+    session.dispose();
+    this.audit.log({ type: 'session_delete', sessionId: id, source });
+
+    if (wasActive) {
+      const nextSession =
+        Array.from(this.sessions.values()).find((candidate) => !candidate.exited) ||
+        Array.from(this.sessions.values())[0] ||
+        null;
+      this.activeSessionId = nextSession ? nextSession.id : null;
+    }
+
+    if (!this.activeSessionId) {
+      this.createSession(replacementOptions);
+    } else {
+      this.emitSessionsChanged();
+    }
+
+    const activeSession = this.getActiveSession();
+    return {
+      ok: true,
+      deletedSessionId: id,
+      activeSessionId: this.activeSessionId,
+      session: activeSession.metadata(),
+      output: activeSession.getOutputSince(),
+      sessions: this.listSessions()
+    };
+  }
+
   getControlState() {
     return {
       apiEnabled: this.apiEnabled,
       agentPaused: this.agentPaused,
-      activeSessionId: this.activeSessionId,
-      pendingApprovals: this.listApprovals()
+      activeSessionId: this.activeSessionId
     };
   }
 
@@ -392,81 +431,7 @@ class AgentTerminalController extends EventEmitter {
       throw createHttpError(403, decision.reason);
     }
 
-    if (decision.decision === 'approve') {
-      return this.queueApproval(action, decision, execute);
-    }
-
     return execute();
-  }
-
-  queueApproval(action, decision, execute) {
-    const approval = {
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      status: 'pending',
-      reason: decision.reason,
-      action: {
-        type: action.type,
-        sessionId: action.sessionId,
-        source: action.source,
-        summary: summarizeInput(action.display),
-        command: action.command || null
-      },
-      execute
-    };
-    this.pendingApprovals.set(approval.id, approval);
-    this.audit.log({
-      type: 'approval_requested',
-      approvalId: approval.id,
-      ...approval.action,
-      reason: approval.reason
-    });
-    this.emit('approval:changed', this.listApprovals());
-    this.emit('notification', {
-      title: 'Approval needed',
-      body: approval.action.summary
-    });
-    return {
-      ok: false,
-      approvalRequired: true,
-      approval: this.serializeApproval(approval)
-    };
-  }
-
-  listApprovals() {
-    return Array.from(this.pendingApprovals.values()).map((approval) => this.serializeApproval(approval));
-  }
-
-  serializeApproval(approval) {
-    return {
-      id: approval.id,
-      createdAt: approval.createdAt,
-      status: approval.status,
-      reason: approval.reason,
-      action: approval.action
-    };
-  }
-
-  async approve(id, source = 'ui') {
-    const approval = this.pendingApprovals.get(id);
-    if (!approval) {
-      throw createHttpError(404, `Unknown approval: ${id}`);
-    }
-    this.pendingApprovals.delete(id);
-    this.audit.log({ type: 'approval_approved', approvalId: id, source, action: approval.action });
-    this.emit('approval:changed', this.listApprovals());
-    return approval.execute();
-  }
-
-  deny(id, source = 'ui') {
-    const approval = this.pendingApprovals.get(id);
-    if (!approval) {
-      throw createHttpError(404, `Unknown approval: ${id}`);
-    }
-    this.pendingApprovals.delete(id);
-    this.audit.log({ type: 'approval_denied', approvalId: id, source, action: approval.action });
-    this.emit('approval:changed', this.listApprovals());
-    return { ok: true, denied: id };
   }
 
   async getScreen(sessionId) {
@@ -474,9 +439,8 @@ class AgentTerminalController extends EventEmitter {
   }
 
   async getSessionState(sessionId) {
-    const hasPendingApproval = this.listApprovals().some((approval) => approval.action.sessionId === sessionId);
     const paused = this.agentPaused || this.sessionPaused.has(sessionId) || !this.apiEnabled;
-    return this.getSession(sessionId).getState({ hasPendingApproval, paused });
+    return this.getSession(sessionId).getState({ paused });
   }
 
   interrupt(sessionId, source = 'api') {

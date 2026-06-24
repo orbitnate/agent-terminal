@@ -1,27 +1,51 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
+const { buildAgentManifest, buildOpenApi } = require('./agent-contract');
 
 function writeSse(res, event, payload) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+function hostnameFromHeader(hostHeader) {
+  if (!hostHeader) {
+    return '';
+  }
+  return hostHeader.replace(/^\[/, '').replace(/\](:\d+)?$/, '').replace(/:\d+$/, '');
+}
+
+function isLoopbackHostname(host) {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
 function isLoopbackHost(hostHeader) {
   if (!hostHeader) {
     return false;
   }
-  const host = hostHeader.replace(/^\[/, '').replace(/\](:\d+)?$/, '').replace(/:\d+$/, '');
-  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+  return isLoopbackHostname(hostnameFromHeader(hostHeader));
 }
 
-function isAllowedOrigin(origin) {
+// Loopback is always allowed. `allowedHosts` opts in extra hostnames/IPs
+// (e.g. a Tailscale MagicDNS name or tailnet IP) for remote access.
+function isHostAllowed(hostHeader, allowedHosts = []) {
+  if (!hostHeader) {
+    return false;
+  }
+  const host = hostnameFromHeader(hostHeader);
+  if (isLoopbackHostname(host)) {
+    return true;
+  }
+  return allowedHosts.includes(host);
+}
+
+function isAllowedOrigin(origin, allowedHosts = []) {
   if (!origin) {
     return true;
   }
   try {
     const url = new URL(origin);
-    return url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '::1';
+    return isLoopbackHostname(url.hostname) || allowedHosts.includes(url.hostname);
   } catch (error) {
     return false;
   }
@@ -33,22 +57,78 @@ function isAuthorized(req, token) {
   return bearer === token || req.headers['x-agent-terminal-token'] === token;
 }
 
-function createApiServer({ controller, token, host = '127.0.0.1', port = 9876 }) {
+function createApiServer({
+  controller,
+  token,
+  host = '127.0.0.1',
+  port = 9876,
+  allowedHosts = [],
+  advertiseBaseUrl = null
+}) {
+  // This API can spawn shells and run arbitrary commands, so binding it beyond
+  // loopback without a strong secret would expose a remote shell. Fail loudly.
+  if (!isLoopbackHostname(host)) {
+    if (!token || String(token).length < 16) {
+      throw new Error(
+        'Refusing to bind Agent Terminal to a non-loopback address without a strong token. ' +
+          'Set AGENT_TERMINAL_TOKEN to a secret of at least 16 characters.'
+      );
+    }
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[agent-terminal] API is bound to ${host} and reachable beyond this machine. ` +
+        'It grants shell access; keep the token secret and prefer a private network (e.g. Tailscale).'
+    );
+  }
+
   const app = express();
   const server = http.createServer(app);
   const wss = new WebSocket.Server({ noServer: true });
 
+  function currentBaseUrl() {
+    if (advertiseBaseUrl) {
+      return advertiseBaseUrl;
+    }
+    const address = server.address();
+    const currentPort = address && typeof address === 'object' ? address.port : port;
+    return `http://${host}:${currentPort}`;
+  }
+
+  function publicManifest() {
+    return buildAgentManifest({
+      baseUrl: currentBaseUrl(),
+      runtimeRoot: controller.runtimeRoot,
+      control: controller.getControlState()
+    });
+  }
+
   app.use((req, res, next) => {
-    if (!isLoopbackHost(req.headers.host || '')) {
-      res.status(403).json({ ok: false, error: 'Host must be loopback.' });
+    if (!isHostAllowed(req.headers.host || '', allowedHosts)) {
+      res.status(403).json({ ok: false, error: 'Host is not allowed.' });
       return;
     }
 
-    if (!isAllowedOrigin(req.headers.origin)) {
+    if (!isAllowedOrigin(req.headers.origin, allowedHosts)) {
       res.status(403).json({ ok: false, error: 'Browser origin is not allowed.' });
       return;
     }
 
+    next();
+  });
+
+  app.get('/.well-known/agent-terminal.json', (req, res) => {
+    res.json(publicManifest());
+  });
+
+  app.get('/agent-terminal/v1/manifest', (req, res) => {
+    res.json(publicManifest());
+  });
+
+  app.get('/openapi.json', (req, res) => {
+    res.json(buildOpenApi({ baseUrl: currentBaseUrl() }));
+  });
+
+  app.use((req, res, next) => {
     if (!isAuthorized(req, token)) {
       res.status(401).json({ ok: false, error: 'Missing or invalid Agent Terminal token.' });
       return;
@@ -110,6 +190,14 @@ function createApiServer({ controller, token, host = '127.0.0.1', port = 9876 })
     }
   });
 
+  app.delete('/sessions/:id', (req, res, next) => {
+    try {
+      res.json(controller.deleteSession(req.params.id, 'api'));
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/sessions/:id/output', (req, res, next) => {
     try {
       const session = controller.getSession(req.params.id);
@@ -146,7 +234,7 @@ function createApiServer({ controller, token, host = '127.0.0.1', port = 9876 })
               enter: req.body.enter
             };
       const result = await controller.sendInput(req.params.id, payload, { source: 'api' });
-      res.status(result.approvalRequired ? 202 : 200).json(result);
+      res.json(result);
     } catch (error) {
       next(error);
     }
@@ -165,7 +253,7 @@ function createApiServer({ controller, token, host = '127.0.0.1', port = 9876 })
   app.post('/sessions/:id/launch', async (req, res, next) => {
     try {
       const result = await controller.launch(req.params.id, req.body, { source: 'api' });
-      res.status(result.approvalRequired ? 202 : 200).json(result);
+      res.json(result);
     } catch (error) {
       next(error);
     }
@@ -174,7 +262,7 @@ function createApiServer({ controller, token, host = '127.0.0.1', port = 9876 })
   app.post('/sessions/:id/run', async (req, res, next) => {
     try {
       const result = await controller.runCommand(req.params.id, req.body, { source: 'api' });
-      res.status(result.approvalRequired ? 202 : 200).json(result);
+      res.json(result);
     } catch (error) {
       next(error);
     }
@@ -254,26 +342,6 @@ function createApiServer({ controller, token, host = '127.0.0.1', port = 9876 })
     });
   });
 
-  app.get('/approvals', (req, res) => {
-    res.json({ approvals: controller.listApprovals() });
-  });
-
-  app.post('/approvals/:id/approve', async (req, res, next) => {
-    try {
-      res.json(await controller.approve(req.params.id, 'api'));
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  app.post('/approvals/:id/deny', (req, res, next) => {
-    try {
-      res.json(controller.deny(req.params.id, 'api'));
-    } catch (error) {
-      next(error);
-    }
-  });
-
   app.get('/tasks', (req, res) => {
     res.json({ tasks: controller.tasks.listTasks() });
   });
@@ -313,7 +381,7 @@ function createApiServer({ controller, token, host = '127.0.0.1', port = 9876 })
   });
 
   server.on('upgrade', (req, socket, head) => {
-    if (!isLoopbackHost(req.headers.host || '') || !isAllowedOrigin(req.headers.origin) || !isAuthorized(req, token)) {
+    if (!isHostAllowed(req.headers.host || '', allowedHosts) || !isAllowedOrigin(req.headers.origin, allowedHosts) || !isAuthorized(req, token)) {
       socket.destroy();
       return;
     }
@@ -409,7 +477,7 @@ function createApiServer({ controller, token, host = '127.0.0.1', port = 9876 })
           resolve({
             host,
             port: address.port,
-            baseUrl: `http://${host}:${address.port}`
+            baseUrl: advertiseBaseUrl || `http://${host}:${address.port}`
           });
         });
       });
@@ -425,5 +493,6 @@ function createApiServer({ controller, token, host = '127.0.0.1', port = 9876 })
 module.exports = {
   createApiServer,
   isLoopbackHost,
+  isHostAllowed,
   isAllowedOrigin
 };

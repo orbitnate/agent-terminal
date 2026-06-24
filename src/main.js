@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, clipboard, Notification } = require('electr
 const { AgentTerminalController } = require('./controller');
 const { createApiServer } = require('./api-server');
 const { ensureRuntimeDirs, getRuntimeRoot, writeConnectionInfo } = require('./runtime-store');
+const { buildAgentManifest, buildAgentPrompt } = require('./agent-contract');
 
 let mainWindow = null;
 let controller = null;
@@ -19,7 +20,9 @@ function createWindow() {
     minWidth: 900,
     minHeight: 560,
     title: 'Agent Terminal',
-    backgroundColor: '#12151b',
+    backgroundColor: '#0a0b0f',
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 15, y: 15 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -55,6 +58,21 @@ function writeRuntimeInfo() {
   );
 }
 
+function getCurrentAgentManifest() {
+  return buildAgentManifest({
+    baseUrl: apiInfo && apiInfo.baseUrl,
+    runtimeRoot,
+    token: apiToken,
+    // The copied prompt is the user's explicit "give my agent access" action,
+    // so bake the token in to make it paste-and-go.
+    includeToken: true,
+    control: controller.getControlState(),
+    activeSessionId: controller.activeSessionId,
+    sessions: controller.listSessions(),
+    updatedAt: new Date().toISOString()
+  });
+}
+
 function attachControllerEvents() {
   controller.on('session:output', (payload) => {
     if (payload.sessionId === controller.activeSessionId) {
@@ -74,9 +92,6 @@ function attachControllerEvents() {
     writeRuntimeInfo();
     sendToWindow('control:changed', payload);
   });
-  controller.on('approval:changed', (payload) => {
-    sendToWindow('approval:changed', payload);
-  });
   controller.on('agent:input', (payload) => {
     sendToWindow('agent:input', payload);
   });
@@ -89,6 +104,15 @@ function attachControllerEvents() {
 
 async function startApiServer() {
   const preferredPort = Number(process.env.AGENT_TERMINAL_PORT || 9876);
+  // Default: loopback only. Opt into remote access by binding to a private
+  // interface (e.g. a Tailscale IP) and allowlisting the hostnames agents use.
+  // See docs/REMOTE_ACCESS.md.
+  const bindHost = process.env.AGENT_TERMINAL_HOST || '127.0.0.1';
+  const allowedHosts = (process.env.AGENT_TERMINAL_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const advertiseBaseUrl = process.env.AGENT_TERMINAL_PUBLIC_URL || null;
   const attempts = [preferredPort, 0];
   let lastError = null;
 
@@ -96,8 +120,10 @@ async function startApiServer() {
     apiServer = createApiServer({
       controller,
       token: apiToken,
-      host: '127.0.0.1',
-      port
+      host: bindHost,
+      port,
+      allowedHosts,
+      advertiseBaseUrl
     });
 
     try {
@@ -121,8 +147,7 @@ ipcMain.handle('terminal:get-bootstrap', async () => {
     activeSessionId: controller.activeSessionId,
     sessions: controller.listSessions(),
     session: session.metadata(),
-    output: session.getOutputSince(),
-    approvals: controller.listApprovals()
+    output: session.getOutputSince()
   };
 });
 
@@ -130,6 +155,8 @@ ipcMain.handle('terminal:copy', (event, text) => {
   clipboard.writeText(String(text || ''));
   return true;
 });
+
+ipcMain.handle('terminal:get-agent-prompt', () => buildAgentPrompt(getCurrentAgentManifest()));
 
 ipcMain.handle('terminal:set-active-session', async (event, id) => {
   const session = controller.setActiveSession(id);
@@ -154,11 +181,15 @@ ipcMain.handle('terminal:create-session', async (event, options = {}) => {
   };
 });
 
+ipcMain.handle('terminal:delete-session', async (event, id) => {
+  const payload = controller.deleteSession(id, 'ui');
+  writeRuntimeInfo();
+  return payload;
+});
+
 ipcMain.handle('control:set-api-enabled', (event, enabled) => controller.setApiEnabled(Boolean(enabled), 'ui'));
 ipcMain.handle('control:pause-agents', () => controller.pauseAgents('ui'));
 ipcMain.handle('control:resume-agents', () => controller.resumeAgents('ui'));
-ipcMain.handle('approval:approve', async (event, id) => controller.approve(id, 'ui'));
-ipcMain.handle('approval:deny', (event, id) => controller.deny(id, 'ui'));
 
 ipcMain.on('terminal:input', (event, data) => {
   controller.sendInput(controller.activeSessionId, { data }, { source: 'human' }).catch((error) => {
@@ -178,7 +209,9 @@ ipcMain.on('terminal:resize', (event, size) => {
 
 app.whenReady().then(async () => {
   runtimeRoot = ensureRuntimeDirs(getRuntimeRoot());
-  apiToken = crypto.randomBytes(32).toString('base64url');
+  // A pinned token (AGENT_TERMINAL_TOKEN) lets a remote agent authenticate with
+  // a stable secret it can be configured with; otherwise generate a strong one.
+  apiToken = process.env.AGENT_TERMINAL_TOKEN || crypto.randomBytes(32).toString('base64url');
   controller = new AgentTerminalController({ runtimeRoot });
   attachControllerEvents();
   controller.createSession();

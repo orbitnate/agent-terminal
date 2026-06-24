@@ -6,6 +6,11 @@ let inputBuffer = Buffer.alloc(0);
 
 const TOOLS = [
   {
+    name: 'get_manifest',
+    description: 'Read the Agent Terminal integration contract for coding agents.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
     name: 'list_sessions',
     description: 'List visible Agent Terminal sessions.',
     inputSchema: { type: 'object', properties: {} }
@@ -16,6 +21,15 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: { cwd: { type: 'string' } }
+    }
+  },
+  {
+    name: 'delete_session',
+    description: 'Delete a terminal session from the visible session list.',
+    inputSchema: {
+      type: 'object',
+      required: ['sessionId'],
+      properties: { sessionId: { type: 'string' } }
     }
   },
   {
@@ -53,6 +67,18 @@ const TOOLS = [
     }
   },
   {
+    name: 'read_output',
+    description: 'Read raw terminal output, optionally from a previous offset.',
+    inputSchema: {
+      type: 'object',
+      required: ['sessionId'],
+      properties: {
+        sessionId: { type: 'string' },
+        since: { type: ['number', 'string'] }
+      }
+    }
+  },
+  {
     name: 'read_state',
     description: 'Read the inferred terminal state.',
     inputSchema: {
@@ -75,12 +101,21 @@ const TOOLS = [
     }
   },
   {
-    name: 'approve_command',
-    description: 'Approve a queued action.',
+    name: 'interrupt_session',
+    description: 'Send Ctrl-C to a terminal session.',
     inputSchema: {
       type: 'object',
-      required: ['approvalId'],
-      properties: { approvalId: { type: 'string' } }
+      required: ['sessionId'],
+      properties: { sessionId: { type: 'string' } }
+    }
+  },
+  {
+    name: 'restart_session',
+    description: 'Restart a terminal session.',
+    inputSchema: {
+      type: 'object',
+      required: ['sessionId'],
+      properties: { sessionId: { type: 'string' } }
     }
   },
   {
@@ -91,6 +126,26 @@ const TOOLS = [
   {
     name: 'resume_session',
     description: 'Resume agent writes for all sessions.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'pause_agents',
+    description: 'Pause agent writes for all sessions.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'resume_agents',
+    description: 'Resume agent writes for all sessions.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'disable_control',
+    description: 'Disable local API control until it is enabled again.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'enable_control',
+    description: 'Enable local API control.',
     inputSchema: { type: 'object', properties: {} }
   }
 ];
@@ -110,10 +165,14 @@ function error(id, code, message) {
 
 async function callTool(name, args = {}) {
   switch (name) {
+    case 'get_manifest':
+      return requestJson('GET', '/agent-terminal/v1/manifest');
     case 'list_sessions':
       return requestJson('GET', '/sessions');
     case 'create_session':
       return requestJson('POST', '/sessions', { cwd: args.cwd });
+    case 'delete_session':
+      return requestJson('DELETE', `/sessions/${args.sessionId}`);
     case 'launch_agent':
       return requestJson('POST', `/sessions/${args.sessionId}/launch`, { profile: args.profile });
     case 'send_input':
@@ -123,6 +182,8 @@ async function callTool(name, args = {}) {
       });
     case 'read_screen':
       return requestJson('GET', `/sessions/${args.sessionId}/screen`);
+    case 'read_output':
+      return requestJson('GET', `/sessions/${args.sessionId}/output${args.since !== undefined ? `?since=${encodeURIComponent(args.since)}` : ''}`);
     case 'read_state':
       return requestJson('GET', `/sessions/${args.sessionId}/state`);
     case 'run_command':
@@ -130,12 +191,20 @@ async function callTool(name, args = {}) {
         command: args.command,
         force: args.force
       });
-    case 'approve_command':
-      return requestJson('POST', `/approvals/${args.approvalId}/approve`, {});
+    case 'interrupt_session':
+      return requestJson('POST', `/sessions/${args.sessionId}/interrupt`, {});
+    case 'restart_session':
+      return requestJson('POST', `/sessions/${args.sessionId}/restart`, {});
     case 'pause_session':
+    case 'pause_agents':
       return requestJson('POST', '/control/pause', {});
     case 'resume_session':
+    case 'resume_agents':
       return requestJson('POST', '/control/resume', {});
+    case 'disable_control':
+      return requestJson('POST', '/control/api-enabled', { enabled: false });
+    case 'enable_control':
+      return requestJson('POST', '/control/api-enabled', { enabled: true });
     default:
       throw new Error(`Unknown tool: ${name}`);
   }

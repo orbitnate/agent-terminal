@@ -8,10 +8,10 @@ test('read-only commands are allowed', () => {
   assert.equal(classifyCommand('npm run check').decision, 'allow');
 });
 
-test('write and publish commands require approval', () => {
-  assert.equal(classifyCommand('git commit -m test').decision, 'approve');
-  assert.equal(classifyCommand('npm install left-pad').decision, 'approve');
-  assert.equal(classifyCommand('touch file.txt').decision, 'approve');
+test('local write and publish commands are allowed without approvals', () => {
+  assert.equal(classifyCommand('git commit -m test').decision, 'allow');
+  assert.equal(classifyCommand('npm install left-pad').decision, 'allow');
+  assert.equal(classifyCommand('touch file.txt').decision, 'allow');
 });
 
 test('obviously destructive commands are blocked', () => {

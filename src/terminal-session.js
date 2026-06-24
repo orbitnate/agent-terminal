@@ -28,6 +28,7 @@ class TerminalSession extends EventEmitter {
     this.outputOffset = 0;
     this.lastInputAt = null;
     this.lastOutputAt = null;
+    this.lastError = null;
     this.exited = false;
     this.exitCode = null;
     this.signal = null;
@@ -44,6 +45,7 @@ class TerminalSession extends EventEmitter {
     this.outputStartOffset = 0;
     this.outputOffset = 0;
     this.lastOutputAt = null;
+    this.lastError = null;
     this.generation += 1;
 
     this.screenTerminal = new HeadlessTerminal({
@@ -123,6 +125,7 @@ class TerminalSession extends EventEmitter {
       signal: this.signal,
       lastInputAt: this.lastInputAt,
       lastOutputAt: this.lastOutputAt,
+      lastError: this.lastError,
       outputStartOffset: this.outputStartOffset,
       outputOffset: this.outputOffset
     };
@@ -187,15 +190,12 @@ class TerminalSession extends EventEmitter {
     };
   }
 
-  async getState({ hasPendingApproval = false, paused = false } = {}) {
+  async getState({ paused = false } = {}) {
     if (this.exited) {
-      return this.buildState('exited', { hasPendingApproval, paused });
-    }
-    if (hasPendingApproval) {
-      return this.buildState('approval_needed', { hasPendingApproval, paused });
+      return this.buildState('exited', { paused });
     }
     if (paused) {
-      return this.buildState('waiting_for_input', { hasPendingApproval, paused, reason: 'Agent control is paused.' });
+      return this.buildState('waiting_for_input', { paused, reason: 'Agent control is paused.' });
     }
 
     const screen = await this.getScreen();
@@ -206,29 +206,28 @@ class TerminalSession extends EventEmitter {
     const recentOutputMs = this.lastOutputAt ? Date.now() - Date.parse(this.lastOutputAt) : Infinity;
 
     if (/(^|[\s~\w./-])[%$#]\s*$/.test(lastNonEmpty)) {
-      return this.buildState('shell_prompt', { hasPendingApproval, paused, screen });
+      return this.buildState('shell_prompt', { paused, screen });
     }
 
     if (
       /❯\s*$/.test(lastNonEmpty) ||
       /Enter to confirm|Esc to cancel|Do you want|Would you like|approval|permission|Continue\?/i.test(plain)
     ) {
-      return this.buildState('waiting_for_input', { hasPendingApproval, paused, screen });
+      return this.buildState('waiting_for_input', { paused, screen });
     }
 
     if (/Claude|Codex|thinking|Running|Warping|Cooking|tokens/i.test(plain)) {
       return this.buildState(recentOutputMs < 8000 ? 'running' : 'tui_prompt', {
-        hasPendingApproval,
         paused,
         screen
       });
     }
 
     if (recentOutputMs < 2000) {
-      return this.buildState('running', { hasPendingApproval, paused, screen });
+      return this.buildState('running', { paused, screen });
     }
 
-    return this.buildState('unknown', { hasPendingApproval, paused, screen });
+    return this.buildState('unknown', { paused, screen });
   }
 
   buildState(state, extras = {}) {
@@ -237,7 +236,6 @@ class TerminalSession extends EventEmitter {
       state,
       exited: this.exited,
       paused: Boolean(extras.paused),
-      hasPendingApproval: Boolean(extras.hasPendingApproval),
       reason: extras.reason || null,
       outputOffset: this.outputOffset,
       lastInputAt: this.lastInputAt,
@@ -269,7 +267,17 @@ class TerminalSession extends EventEmitter {
 
     this.cols = nextCols;
     this.rows = nextRows;
-    this.pty.resize(nextCols, nextRows);
+    if (this.pty && !this.exited) {
+      try {
+        this.pty.resize(nextCols, nextRows);
+      } catch (error) {
+        this.lastError = {
+          type: 'resize',
+          message: error.message,
+          timestamp: new Date().toISOString()
+        };
+      }
+    }
     this.screenTerminal.resize(nextCols, nextRows);
   }
 
@@ -286,7 +294,15 @@ class TerminalSession extends EventEmitter {
 
   dispose() {
     if (this.pty && !this.exited) {
-      this.pty.kill();
+      try {
+        this.pty.kill();
+      } catch (error) {
+        this.lastError = {
+          type: 'dispose',
+          message: error.message,
+          timestamp: new Date().toISOString()
+        };
+      }
     }
   }
 }
